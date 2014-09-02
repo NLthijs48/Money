@@ -25,8 +25,14 @@ exports.client_newParticipant = (name) !->
 	db.shared "dummies #{userId}", name
 	db.shared 'minDummyId', userId
 
-exports.client_newTransaction = (values, borrowers) !->
+exports.client_newTransaction = (values) !->
 	totalCents = Math.round(parseFloat(values.amount)*100)
+
+	borrowers = []
+	for k, v of values
+		if k.indexOf('pt_') is 0 and v is true
+			id = 0|k.substr(3, k.length)
+			borrowers.push id if id
 
 	# TODO: check for sensible input
 	return if !borrowers.length
@@ -44,11 +50,23 @@ exports.client_newTransaction = (values, borrowers) !->
 	db.shared 'maxTransactionId', transactionId
 	db.shared "transactions #{transactionId}", transactionObj
 
-exports.client_updateTransaction = (transactionId, values, borrowers) !->
+exports.client_updateTransaction = (transactionId, values) !->
 	transactionObj = (db.shared "transactions #{transactionId}")
 	#return if transactionObj.creatorId != plugin.userId()
 	# TODO: check that the object exists, and that the current user is allowed to change
 	# TODO: change borrowers and cents (only when the transaction is recent)
+
+	borrowers = []
+
+	# push current borrowers when they haven't been removed through this update
+	(transactionObj "borrowers")? (borrowerId) !->
+		borrowers.push(borrowerId) if values["pt_#{borrowerId}"] isnt false
+
+	# now push new borrowers that were added through this update
+	for k, v of values
+		if k.indexOf('pt_') is 0 and v is true
+			id = 0|k.substr(3, k.length)
+			borrowers.push id if id and id not in borrowers
 	
 	return if !borrowers.length
 

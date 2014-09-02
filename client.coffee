@@ -70,23 +70,34 @@ showTransactionModal = (transactionId) !->
 
 	modalContent = !->
 		Dom.style textAlign: 'left'
-		Dom.text tr("Payed by %1: ", (participants (transaction 'lenderId')))
-		Dom.text "€ " + ((transaction 'cents')/100).toFixed(2)
+		Dom.span !->
+			Dom.style fontWeight: 'bold'
+			Dom.text "€ " + ((transaction 'cents')/100).toFixed(2) + " "
+			Dom.text tr("payed by %1", (participants (transaction 'lenderId')))
 		Dom.br()
 
 		tDate = new Date((transaction 'time') * 1000)
-		Dom.small tr("on %1 (%2)", tDate.toLocaleDateString(), tDate.toLocaleTimeString())
+		Dom.small tr("%1 on %2", tDate.toLocaleTimeString(), tDate.toLocaleDateString())
 
 		Dom.div !->
-			Dom.style margin: '12px 0 0'
-			Dom.text tr("%1 participant|s: ", borrowersCount())
+			Dom.style margin: '12px 0 0', fontWeight: 'bold'
+			Dom.text tr("%1 participant|s", borrowersCount())
 		Dom.small !->
 			names = []
 			for borrowerId, cents of (transaction 'borrowers')()
-				names.push (participants borrowerId) + " €#{(cents/100).toFixed(2)}"
-			Dom.text names.join(', ')
+				Dom.div !->
+					Dom.style
+						display: 'inline-block'
+						backgroundColor: '#bbb'
+						color: '#fff'
+						margin: '3px 3px 0 0'
+						borderRadius: '3px'
+						padding: '3px 6px'
+					Dom.text (participants borrowerId)
+					Dom.br()
+					Dom.text "€#{(cents/100).toFixed(2)}"
 
-	if (transaction 'creatorId') is curUserId
+	if +(transaction 'creatorId') is curUserId or +(transaction 'lenderId') is curUserId
 		Modal.show (transaction 'description'), !->
 			modalContent()
 		, (choice) !->
@@ -102,7 +113,7 @@ renderBalances = !-> Dom.ul !->
 	participants (participantId, participantName) !->
 		isMe = +participantId is curUserId
 		Dom.li !->
-			Dom.style { display_: 'box', _boxAlign: 'center' }
+			Dom.style display_: 'box', _boxAlign: 'center'
 
 			if participantId>0
 				Dom.div !->
@@ -120,7 +131,7 @@ renderBalances = !-> Dom.ul !->
 						Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
 
 			Dom.div !->
-				Dom.style { _boxFlex: 1, fontWeight: if isMe then 'bold' else 'normal' }
+				Dom.style _boxFlex: 1, fontWeight: if isMe then 'bold' else 'normal'
 				Dom.text participantName
 
 			Dom.div !->
@@ -136,7 +147,7 @@ renderBalances = !-> Dom.ul !->
 # the page that is used to add a participant (a non happening-member)
 renderNewParticipant = !->
 	Page.setTitle tr("Add participant")
-	Form.pageSubmitNew (values) !->
+	Form.setPageSubmit (values) !->
 		name = values.name.trim()
 		if !name
 			Modal.show tr("Please enter a name")
@@ -157,57 +168,45 @@ renderNewParticipant = !->
 		Form.input
 			name: 'name'
 			text: tr("Name")
+	, true
 
 
 renderNewTransaction = (id) !->
-	selected = Obs.hash()
-
-	Obs.onClean !->
-		(Db.local 'lenderId', null)
+	log '--- rendering new transaction!'
+	selCount = Obs.value 0
 
 	if id is 'new'
 		Page.setTitle tr("New transaction")
-		Form.pageSubmitNew (values) !->
+		Form.setPageSubmit (values) !->
 			if !values.amount
 				Modal.show "Please enter the amount"
 			else if !values.description
 				Modal.show "Please enter the description"
-			else if !Obs.count(selected)
+			else if !selCount()
 				Modal.show "Select at least one person"
 			else
 				log 'form values', values
-				borrowers = []
-				selected (borrowerId) !->
-					borrowers.push(borrowerId)
-				values.lenderId = lenderId()
-				Server.call 'newTransaction', values, borrowers
+				Server.call 'newTransaction', values
 				Page.back()
+		, true
 
 	else
 		transaction = (Db.shared "transactions #{id}")
-		(transaction 'borrowers') (borrowerId) !->
-			(selected borrowerId, true)
 
 		Page.setTitle tr("Edit transaction")
 		Page.setActions Plugin.resourceUri('icon-trash-48.png'), !->
 				Server.call 'delTransaction', id
 				Page.back()
-		Form.pageSubmitEdit (values) !->
+		Form.setPageSubmit (values) !->
 			if !values.amount
 				Modal.show "Please enter the amount"
 			else if !values.description
 				Modal.show "Please enter the description"
-			else if !Obs.count(selected)
+			else if !selCount()
 				Modal.show "Select at least one person"
 			else
 				log 'form values', values
-				borrowers = []
-				selected (borrowerId) !->
-					borrowers.push(borrowerId)
-				log 'borrowers ===> ', borrowers
-				values = values
-				values.lenderId = lenderId()
-				Server.call 'updateTransaction', id, values, borrowers
+				Server.call 'updateTransaction', id, values
 				Page.back()
 
 	lenderId = Obs.value((transaction? 'lenderId')||curUserId)
@@ -217,7 +216,7 @@ renderNewTransaction = (id) !->
 		Dom.style padding: '6px'
 
 		Dom.div !->
-			Dom.style { display_: 'box', _boxPack: 'center' }
+			Dom.style display_: 'box', _boxPack: 'center'
 
 			Dom.div !->
 				Dom.style
@@ -237,20 +236,16 @@ renderNewTransaction = (id) !->
 					Dom.style _boxFlex: 1
 					Form.input
 						name: 'amount'
-						value: ((transaction? 'cents')||0) / 100
+						value: (if transaction then (transaction? 'cents') / 100 else null)
 						text: tr('0.-')
 						type: 'number'
-						onEdit: (v) !->
-							log 'setting to', v
+						onChange: (v) !->
 							(enteredAmount v)
 						inScope: !-> Dom.style fontSize: '100%'
 				Dom.div !-> Dom.style width: '0.8em' # center the amount input
 
 		Dom.div !->
-			Dom.style
-				display_: 'box'
-				_boxPack: 'center'
-				marginBottom: '14px'
+			Dom.style display_: 'box', _boxPack: 'center', marginBottom: '14px'
 
 			Dom.div !->
 				Dom.style maxWidth: '14em'
@@ -261,78 +256,106 @@ renderNewTransaction = (id) !->
 
 		Form.sep()
 
-		Form.box !->
-			Dom.style fontSize: '125%'
-			Dom.text tr("Paying person")
-			Dom.div (if +lenderId() is +curUserId then tr("You") else (participants lenderId()))
-			Dom.onTap !->
-				Modal.show tr("Select payer"), !->
-					Dom.style width: '80%'
-					Dom.ol !->
+		# input that handles selection of the paying person
+		selectPayer = (opts) !->
+			[handleChange, initValue] = Form.makeInput opts, (v) -> 0|v
+
+			value = Obs.value initValue
+			Form.box !->
+				opts.content? value()
+
+				Dom.onTap !->
+					Modal.show opts.optionsTitle, !->
+						Dom.style width: '80%'
+						Dom.ol !->
+							Dom.style
+								maxHeight: '40%'
+								overflow: 'auto'
+								backgroundColor: '#eee'
+								margin: '-12px -12px -15px -12px'
+
+							options = opts.options?() or opts.options
+							for optionId, optionName of options
+								Dom.li !->
+									chosenId = optionId # bind to this scope
+									opts.optionContent? chosenId, optionName, (+value() is +chosenId)
+									
+									Dom.onTap !->
+										value chosenId
+										handleChange value()
+										Modal.remove()
+
+
+		# render selection of paying person
+		selectPayer
+			name: 'lenderId'
+			value: (transaction? 'lenderId')||curUserId
+			options: participants
+			optionsTitle: tr("Change paying person")
+			optionContent: (optionId, optionName, isChosen) !->
+				log "option #{optionId} #{optionName} #{isChosen}"
+				if optionId>0
+					Dom.div !->
 						Dom.style
-							maxHeight: '40%'
-							overflow: 'auto'
-							backgroundColor: '#eee'
-							margin: '-12px -12px -15px -12px'
+							width: '38px'
+							height: '38px'
+							backgroundSize: 'cover'
+							backgroundPosition: '50% 50%'
+							margin: '0 4px 0 0'
+							border: 'solid 2px #aaa'
+							borderRadius: '36px'
+						
+						if avatar = (Plugin.users "#{optionId} public avatar")
+							Dom.style backgroundImage: Photo.css(avatar)
+						else
+							Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
 
-						participants (participantId, participantName) !->
-							Dom.li !->
-								if participantId > 0
-									Dom.div !->
-										Dom.style
-											width: '38px'
-											height: '38px'
-											backgroundSize: 'cover'
-											backgroundPosition: '50% 50%'
-											margin: '0 4px 0 0'
-											border: 'solid 2px #aaa'
-											borderRadius: '36px'
-										
-										if avatar = (Plugin.users "#{participantId} public avatar")
-											Dom.style backgroundImage: Photo.css(avatar)
-										else
-											Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
+				if +optionId is curUserId
+					optionName = tr("You")
+					Dom.style fontWeight: 'bold'
+				Dom.text optionName
 
-								if +participantId is curUserId
-									participantName = tr("You")
-									Dom.style fontWeight: 'bold'
-								Dom.text participantName
+				Dom.div !->
+					Dom.style
+						padding: '0 10px'
+						_boxFlex: 1
+						textAlign: 'right'
+						fontSize: '150%'
+						color: '#72BB53'
+					Dom.text (if isChosen then "✓" else "")
+			content: (value) !->
+				Dom.style fontSize: '125%'
+				Dom.text tr("Payed by %1", (if +value is +curUserId then tr("you") else (participants value)))
+				Dom.div tr("Tap to change")
 
-								Dom.div !->
-									Dom.style
-										padding: '0 10px'
-										_boxFlex: 1
-										textAlign: 'right'
-										fontSize: '150%'
-										color: '#72BB53'
-									Dom.text (if +lenderId() is +participantId then "✓" else "")
-								
-								Dom.onTap !->
-									(lenderId participantId)
-									Modal.remove()
 
 		Form.sep()
+
+		participantToggles = {}
+		selCount = Obs.value 0
 
 		Dom.div !->
 			Dom.style
 				display_: 'box'
 				_boxAlign: 'center'
 				padding: '12px 2px 0 6px'
-			selectedCount = Obs.streamCount(selected)
 			Dom.h2 !->
 				Dom.style display: 'inline-block'
-				Dom.text tr("Participants: %1", selectedCount())
+				Dom.text tr("Participants: %1", selCount())
 			Dom.div !->
-				Dom.style { _boxFlex: 1, textAlign: 'right' }
+				Dom.style _boxFlex: 1, textAlign: 'right'
 				Widgets.button tr("Clear"), !->
 					participants (participantId) !->
-						(selected participantId, null)
+						participantToggles[participantId]?.value false
 				Widgets.button tr("Select all"), !->
 					participants (participantId) !->
-						(selected participantId, true)
+						participantToggles[participantId]?.value true
 
-		participants (participantId, participantName) !->
-			isMe = +participantId is curUserId
+		# input that handles selection of the participants
+		participantToggle = (opts) ->
+			[handleChange, initValue] = Form.makeInput opts, (v) -> !!v
+
+			value = Obs.value initValue
 			Dom.section !->
 				Dom.style
 					display: 'inline-block'
@@ -341,49 +364,67 @@ renderNewTransaction = (id) !->
 					width: boxSize()-28 + 'px'
 					height: '42px'
 
-				Dom.div !->
-					Dom.style { display_: 'box', _boxAlign: 'center', height: '100%' }
-					if participantId > 0
-						Dom.div !->
-							Dom.style
-								width: '38px'
-								height: '38px'
-								backgroundSize: 'cover'
-								backgroundPosition: '50% 50%'
-								margin: '0 4px 0 0'
-								border: 'solid 2px #aaa'
-								borderRadius: '36px'
-							
-							if avatar = (Plugin.users "#{participantId} public avatar")
-								Dom.style backgroundImage: Photo.css(avatar)
-							else
-								Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
-
-					selCount = Obs.streamCount(selected)
-					Dom.div !->
-						Dom.style
-							_boxFlex: 1
-							fontWeight: if isMe then 'bold' else 'normal'
-							overflow: 'hidden'
-							textOverflow: 'ellipsis'
-
-						participantName = tr("Yourself") if +participantId is curUserId
-						Dom.text participantName
-						if selCount() and (selected participantId) and enteredAmount()
-							Dom.br()
-							Dom.span !->
-								Dom.style { fontWeight: 'normal', fontSize: '85%', color: 'gray' }
-								Dom.text '€ ' + (Math.round(enteredAmount() / selCount() * 100) / 100).toFixed(2)
-
-					Dom.div !->
-						Dom.style { textAlign: 'right', color: '#72BB53', fontWeight: 'bold' }
-						Dom.text (if (selected participantId) then "✓" else "")
+				opts.content? value()
 
 				Dom.onTap !->
-					if (selected "##{participantId}")
-						(selected participantId, null)
-					else
-						(selected participantId, true)
+					value !value()
+					handleChange value()
+
+			value: (arg) !->
+				if arg is undefined
+					return value()
+				value !!arg
+				handleChange !!arg
+
+
+		# create participantToggles for each participant
+		participants (participantId, participantName) !->
+			participantToggles[participantId] = participantToggle
+				name: 'pt_'+participantId
+				value: !!(transaction? "borrowers #{participantId}")
+				content: (value) !->
+					if value
+						selCount selCount()+1
+						Obs.onClean !->
+							selCount selCount()-1
+
+					Dom.div !->
+						Dom.style display_: 'box', _boxAlign: 'center', height: '100%'
+						if participantId > 0
+							Dom.div !->
+								Dom.style
+									width: '38px'
+									height: '38px'
+									backgroundSize: 'cover'
+									backgroundPosition: '50% 50%'
+									margin: '0 4px 0 0'
+									border: 'solid 2px #aaa'
+									borderRadius: '36px'
+								
+								if avatar = (Plugin.users "#{participantId} public avatar")
+									Dom.style backgroundImage: Photo.css(avatar)
+								else
+									Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
+
+						Dom.div !->
+							Dom.style
+								_boxFlex: 1
+								fontWeight: if +participantId is curUserId then 'bold' else 'normal'
+								overflow: 'hidden'
+								textOverflow: 'ellipsis'
+
+							participantName = tr("Yourself") if +participantId is curUserId
+							Dom.text participantName
+							if selCount() and value and enteredAmount()
+								Dom.br()
+								Dom.span !->
+									Dom.style fontWeight: 'normal', fontSize: '85%', color: 'gray'
+									Dom.text '€ ' + (Math.round(enteredAmount() / selCount() * 100) / 100).toFixed(2)
+
+						Dom.div !->
+							Dom.style textAlign: 'right', color: '#72BB53', fontWeight: 'bold'
+							Dom.text (if value then "✓" else "")
+
 
 		Dom.section !->
 			Dom.style
@@ -404,6 +445,7 @@ renderNewTransaction = (id) !->
 
 exports.render = !->
 	what = (Page.state 0)
+	log '--- what', what
 	if what == 'balances'
 		renderBalances()
 	else if what == 'newParticipant'
@@ -413,7 +455,7 @@ exports.render = !->
 	else
 		# main page with an overview of transactions concerning the current user
 		Dom.div !->
-			Dom.style { display_: 'box', margin: '6px 0', _boxAlign: 'center' }
+			Dom.style display_: 'box', margin: '6px 0', _boxAlign: 'center'
 				
 			# button to trigger the balances overview page
 			Widgets.bigButton !->
@@ -423,7 +465,7 @@ exports.render = !->
 
 			# this user's total balance
 			Dom.div !->
-				Dom.style { _boxFlex: 1, textAlign: 'right', paddingRight: '14px' }
+				Dom.style  _boxFlex: 1, textAlign: 'right', paddingRight: '14px'
 				Dom.span !->
 					Dom.style fontSize: '85%'
 					Dom.text "Your balance:"
@@ -454,15 +496,14 @@ exports.render = !->
 						Obs.onClean !->
 							(borrowedCents 0)
 
-				Obs.observe !-> if lentCents() or borrowedCents()
+				Obs.observe !-> if lentCents() or borrowedCents() or +(transaction 'creatorId') is curUserId
 					log '>> lent, borrowed', lentCents(), borrowedCents()
 					Dom.li !->
 						borrowersCount = Obs.streamCount(transaction 'borrowers')
 
 						# transaction description, amount and how many people involved
 						Dom.div !->
-							Dom.style
-								_boxFlex: 1
+							Dom.style _boxFlex: 1
 							Dom.text "#{(transaction 'description')}"
 							Dom.br()
 							lenderName = if +(transaction 'lenderId') is curUserId then tr("you") else (Plugin.users "#{(transaction 'lenderId')} name")
@@ -481,3 +522,4 @@ exports.render = !->
 
 						#Dom.onTap !-> Page.nav id
 						Dom.onTap !-> showTransactionModal(id)
+			, (id) -> -id
