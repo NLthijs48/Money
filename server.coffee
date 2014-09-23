@@ -60,7 +60,7 @@ exports.client_updateTransaction = (transactionId, values) !->
 
 	# push current borrowers when they haven't been removed through this update
 	(transactionObj "borrowers")? (borrowerId) !->
-		borrowers.push(borrowerId) if values["pt_#{borrowerId}"] isnt false
+		borrowers.push(+borrowerId) if values["pt_#{borrowerId}"] isnt false
 
 	# now push new borrowers that were added through this update
 	for k, v of values

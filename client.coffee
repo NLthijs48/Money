@@ -7,8 +7,8 @@ Page = require 'page'
 Photo = require 'photo'
 Plugin = require 'plugin'
 Server = require 'server'
+Ui = require 'ui'
 {tr} = require 'i18n'
-Widgets = require 'widgets'
 
 boxSize = Obs.value()
 Obs.observe !->
@@ -108,27 +108,14 @@ showTransactionModal = (transactionId) !->
 			modalContent()
 
 # the balances page shows the balances for all participants
-renderBalances = !-> Dom.ul !->
+renderBalances = !-> Ui.list !->
 	Page.setTitle tr("All balances")
 	participants (participantId, participantName) !->
 		isMe = +participantId is curUserId
-		Dom.li !->
+		Ui.item !->
 			Dom.style display_: 'box', _boxAlign: 'center'
 
-			if participantId>0
-				Dom.div !->
-					Dom.style
-						width: '38px'
-						height: '38px'
-						backgroundSize: 'cover'
-						backgroundPosition: '50% 50%'
-						margin: '0 4px 0 0'
-						border: 'solid 2px #aaa'
-						borderRadius: '36px'
-					if avatar = (Plugin.users "#{participantId} public avatar")
-						Dom.style backgroundImage: Photo.css(avatar)
-					else
-						Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
+			Ui.avatar Plugin.userAvatar(participantId) if participantId>0
 
 			Dom.div !->
 				Dom.style _boxFlex: 1, fontWeight: if isMe then 'bold' else 'normal'
@@ -160,7 +147,7 @@ renderNewParticipant = !->
 		if !unique
 			Modal.show tr("Name has already been used to add a participant. Please choose a different name.", name)
 		else
-			Server.call 'newParticipant', name
+			Server.sync 'newParticipant', name
 			Page.back()
 
 	Dom.form !->
@@ -186,7 +173,16 @@ renderNewTransaction = (id) !->
 				Modal.show "Select at least one person"
 			else
 				log 'form values', values
-				Server.call 'newTransaction', values
+				Server.sync 'newTransaction', values, !->
+					id = ((Db.shared 'maxTransactionId')||0)+1
+					Db.shared "transactions #{id}",
+						creatorId: Plugin.userId()
+						lenderId: values.lenderId
+						description: values.description
+						cents: Math.round(parseFloat(values.amount)*100)
+						time: Math.round(Date.now()/1000)
+						syncState: 'adding'
+
 				Page.back()
 		, true
 
@@ -194,9 +190,15 @@ renderNewTransaction = (id) !->
 		transaction = (Db.shared "transactions #{id}")
 
 		Page.setTitle tr("Edit transaction")
-		Page.setActions Plugin.resourceUri('icon-trash-48.png'), !->
-				Server.call 'delTransaction', id
-				Page.back()
+		Page.setActions
+			icon: Plugin.resourceUri('icon-trash-48.png')
+			action: !->
+				Modal.confirm tr("Delete transaction?"), tr("Balances of affected persons will be recalculated"), !->
+					Server.sync 'delTransaction', id, !->
+						Db.shared "transactions #{id}",
+							syncState: 'removing'
+					Page.back()
+
 		Form.setPageSubmit (values) !->
 			if !values.amount
 				Modal.show "Please enter the amount"
@@ -206,7 +208,10 @@ renderNewTransaction = (id) !->
 				Modal.show "Select at least one person"
 			else
 				log 'form values', values
-				Server.call 'updateTransaction', id, values
+				Server.sync 'updateTransaction', id, values, !->
+					Db.shared "transactions #{id}",
+						description: values.description
+						syncState: 'updating'
 				Page.back()
 
 	lenderId = Obs.value((transaction? 'lenderId')||curUserId)
@@ -267,16 +272,17 @@ renderNewTransaction = (id) !->
 				Dom.onTap !->
 					Modal.show opts.optionsTitle, !->
 						Dom.style width: '80%'
-						Dom.ol !->
+						Ui.list !->
 							Dom.style
 								maxHeight: '40%'
 								overflow: 'auto'
+								_overflowScrolling: 'touch'
 								backgroundColor: '#eee'
 								margin: '-12px -12px -15px -12px'
 
 							options = opts.options?() or opts.options
 							for optionId, optionName of options
-								Dom.li !->
+								Ui.item !->
 									chosenId = optionId # bind to this scope
 									opts.optionContent? chosenId, optionName, (+value() is +chosenId)
 									
@@ -294,21 +300,7 @@ renderNewTransaction = (id) !->
 			optionsTitle: tr("Change paying person")
 			optionContent: (optionId, optionName, isChosen) !->
 				log "option #{optionId} #{optionName} #{isChosen}"
-				if optionId>0
-					Dom.div !->
-						Dom.style
-							width: '38px'
-							height: '38px'
-							backgroundSize: 'cover'
-							backgroundPosition: '50% 50%'
-							margin: '0 4px 0 0'
-							border: 'solid 2px #aaa'
-							borderRadius: '36px'
-						
-						if avatar = (Plugin.users "#{optionId} public avatar")
-							Dom.style backgroundImage: Photo.css(avatar)
-						else
-							Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
+				Ui.avatar Plugin.userAvatar(optionId) if optionId>0
 
 				if +optionId is curUserId
 					optionName = tr("You")
@@ -344,10 +336,10 @@ renderNewTransaction = (id) !->
 				Dom.text tr("Participants: %1", selCount())
 			Dom.div !->
 				Dom.style _boxFlex: 1, textAlign: 'right'
-				Widgets.button tr("Clear"), !->
+				Ui.button tr("Clear"), !->
 					participants (participantId) !->
 						participantToggles[participantId]?.value false
-				Widgets.button tr("Select all"), !->
+				Ui.button tr("Select all"), !->
 					participants (participantId) !->
 						participantToggles[participantId]?.value true
 
@@ -390,21 +382,7 @@ renderNewTransaction = (id) !->
 
 					Dom.div !->
 						Dom.style display_: 'box', _boxAlign: 'center', height: '100%'
-						if participantId > 0
-							Dom.div !->
-								Dom.style
-									width: '38px'
-									height: '38px'
-									backgroundSize: 'cover'
-									backgroundPosition: '50% 50%'
-									margin: '0 4px 0 0'
-									border: 'solid 2px #aaa'
-									borderRadius: '36px'
-								
-								if avatar = (Plugin.users "#{participantId} public avatar")
-									Dom.style backgroundImage: Photo.css(avatar)
-								else
-									Dom.style backgroundImage: "url(#{Plugin.resourceUri('silhouette-aaa.png')})"
+						Ui.avatar Plugin.userAvatar(participantId) if participantId > 0
 
 						Dom.div !->
 							Dom.style
@@ -458,7 +436,7 @@ exports.render = !->
 			Dom.style display_: 'box', margin: '6px 0', _boxAlign: 'center'
 				
 			# button to trigger the balances overview page
-			Widgets.bigButton !->
+			Ui.bigButton !->
 				Dom.style margin: 0
 				Dom.text tr("All balances")
 			, !-> Page.nav 'balances'
@@ -479,8 +457,8 @@ exports.render = !->
 					Dom.text "€ " + euros.toFixed(2)
 
 		# display an overview of transactions where the current user is involved
-		Dom.ul !->
-			Dom.li !->
+		Ui.list !->
+			Ui.item !->
 				Dom.style color: '#72bb53'
 				Dom.text tr('+ New transaction')
 				Dom.onTap !-> Page.nav 'new'
@@ -498,28 +476,43 @@ exports.render = !->
 
 				Obs.observe !-> if lentCents() or borrowedCents() or +(transaction 'creatorId') is curUserId
 					log '>> lent, borrowed', lentCents(), borrowedCents()
-					Dom.li !->
-						borrowersCount = Obs.streamCount(transaction 'borrowers')
+					Ui.item !->
+						syncText = false
+						if ss=(transaction 'syncState')
+							if ss is 'updating'
+								syncText = tr("Updating transaction...")
+							else if ss is 'removing'
+								syncText = tr("Removing transaction...")
+							else
+								syncText = tr("Adding transaction...")
+						else
+							borrowersCount = Obs.streamCount(transaction 'borrowers')
 
 						# transaction description, amount and how many people involved
 						Dom.div !->
 							Dom.style _boxFlex: 1
 							Dom.text "#{(transaction 'description')}"
 							Dom.br()
-							lenderName = if +(transaction 'lenderId') is curUserId then tr("you") else (Plugin.users "#{(transaction 'lenderId')} name")
-							Dom.small tr("€%1 by %2 for %3 person|s", (transaction 'cents')/100, lenderName, borrowersCount())
+							if syncText
+								Dom.small syncText
+							else
+								lenderName = if +(transaction 'lenderId') is curUserId then tr("you") else Plugin.userName(transaction 'lenderId')
+								Dom.small tr("€%1 by %2 for %3 person|s", (transaction 'cents')/100, lenderName, borrowersCount())
 
 						# balance for this transaction, for the current user
 						Dom.div !->
-							cents = lentCents() - borrowedCents()
+							if syncText
+								Ui.spinner 24
+							else
+								cents = lentCents() - borrowedCents()
+								Dom.style
+									textAlign: 'right'
+									fontWeight: 'bold'
+									color: if cents>0 then 'inherit' else '#BB5353'
 
-							Dom.style
-								textAlign: 'right'
-								fontWeight: 'bold'
-								color: if cents>0 then 'inherit' else '#BB5353'
-
-							Dom.text "€ " + (cents/100).toFixed(2)
+								Dom.text "€ " + (cents/100).toFixed(2)
 
 						#Dom.onTap !-> Page.nav id
-						Dom.onTap !-> showTransactionModal(id)
+						if !syncText
+							Dom.onTap !-> showTransactionModal(id)
 			, (id) -> -id
