@@ -1,0 +1,5 @@
+name: Money
+description: Keep track of who owes money to whom.
+icon: coins
+api: 
+store: 700

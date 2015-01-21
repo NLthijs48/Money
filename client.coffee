@@ -73,11 +73,14 @@ showTransactionModal = (transactionId) !->
 		Dom.span !->
 			Dom.style fontWeight: 'bold'
 			Dom.text "€ " + ((transaction 'cents')/100).toFixed(2) + " "
-			Dom.text tr("payed by %1", (participants (transaction 'lenderId')))
+			Dom.text tr("paid by %1", (participants (transaction 'lenderId')))
 		Dom.br()
 
 		tDate = new Date((transaction 'time') * 1000)
 		Dom.small tr("%1 on %2", tDate.toLocaleTimeString(), tDate.toLocaleDateString())
+		if (transaction 'creatorId') isnt (transaction 'lenderId')
+			Dom.br()
+			Dom.small tr("Added by %1", (participants (transaction 'creatorId')))
 
 		Dom.div !->
 			Dom.style margin: '12px 0 0', fontWeight: 'bold'
@@ -97,7 +100,7 @@ showTransactionModal = (transactionId) !->
 					Dom.br()
 					Dom.text "€#{(cents/100).toFixed(2)}"
 
-	if +(transaction 'creatorId') is curUserId or +(transaction 'lenderId') is curUserId
+	if +(transaction 'creatorId') is curUserId or +(transaction 'lenderId') is curUserId or Plugin.userIsAdmin()
 		Modal.show (transaction 'description'), !->
 			modalContent()
 		, (choice) !->
@@ -113,12 +116,12 @@ renderBalances = !-> Ui.list !->
 	participants (participantId, participantName) !->
 		isMe = +participantId is curUserId
 		Ui.item !->
-			Dom.style display_: 'box', _boxAlign: 'center'
+			Dom.style Box: 'center'
 
 			Ui.avatar Plugin.userAvatar(participantId) if participantId>0
 
 			Dom.div !->
-				Dom.style _boxFlex: 1, fontWeight: if isMe then 'bold' else 'normal'
+				Dom.style Flex: 1, marginLeft: '4px', fontWeight: if isMe then 'bold' else 'normal'
 				Dom.text participantName
 
 			Dom.div !->
@@ -127,7 +130,7 @@ renderBalances = !-> Ui.list !->
 				Dom.style
 					textAlign: 'right'
 					fontWeight: 'bold'
-					color: if cents>0 then 'inherit' else '#BB5353'
+					color: if cents>0 then 'inherit' else Plugin.colors().highlight
 
 				Dom.text "€ " + cents.toFixed(2)
 
@@ -184,7 +187,6 @@ renderNewTransaction = (id) !->
 						syncState: 'adding'
 
 				Page.back()
-		, true
 
 	else
 		transaction = (Db.shared "transactions #{id}")
@@ -221,14 +223,13 @@ renderNewTransaction = (id) !->
 		Dom.style padding: '6px'
 
 		Dom.div !->
-			Dom.style display_: 'box', _boxPack: 'center'
+			Dom.style Box: 'center'
 
 			Dom.div !->
 				Dom.style
+					Box: 'middle'
 					width: '4.5em'
-					display_: 'box'
 					fontSize: '250%'
-					_boxAlign: 'center'
 
 				Dom.div !->
 					Dom.style
@@ -238,7 +239,7 @@ renderNewTransaction = (id) !->
 						color: 'gray'
 					Dom.text '€'
 				Dom.div !->
-					Dom.style _boxFlex: 1
+					Dom.style Flex: 1
 					Form.input
 						name: 'amount'
 						value: (if transaction then (transaction? 'cents') / 100 else null)
@@ -246,11 +247,14 @@ renderNewTransaction = (id) !->
 						type: 'number'
 						onChange: (v) !->
 							(enteredAmount v)
-						inScope: !-> Dom.style fontSize: '100%'
+						inScope: !->
+							Dom.style fontSize: '100%'
+							Dom.prop step: '0.01'
+
 				Dom.div !-> Dom.style width: '0.8em' # center the amount input
 
 		Dom.div !->
-			Dom.style display_: 'box', _boxPack: 'center', marginBottom: '14px'
+			Dom.style Box: 'center', marginBottom: '14px'
 
 			Dom.div !->
 				Dom.style maxWidth: '14em'
@@ -263,22 +267,25 @@ renderNewTransaction = (id) !->
 
 		# input that handles selection of the paying person
 		selectPayer = (opts) !->
+			content = opts.content
+			delete opts.content # don't feed this to the makeInput below
+
 			[handleChange, initValue] = Form.makeInput opts, (v) -> 0|v
 
 			value = Obs.value initValue
 			Form.box !->
-				opts.content? value()
+				content? value()
 
 				Dom.onTap !->
 					Modal.show opts.optionsTitle, !->
 						Dom.style width: '80%'
-						Ui.list !->
+						Dom.div !->
 							Dom.style
 								maxHeight: '40%'
 								overflow: 'auto'
 								_overflowScrolling: 'touch'
 								backgroundColor: '#eee'
-								margin: '-12px -12px -15px -12px'
+								margin: '-12px'
 
 							options = opts.options?() or opts.options
 							for optionId, optionName of options
@@ -310,14 +317,14 @@ renderNewTransaction = (id) !->
 				Dom.div !->
 					Dom.style
 						padding: '0 10px'
-						_boxFlex: 1
+						Flex: 1
 						textAlign: 'right'
 						fontSize: '150%'
-						color: '#72BB53'
+						color: Plugin.colors().highlight
 					Dom.text (if isChosen then "✓" else "")
 			content: (value) !->
 				Dom.style fontSize: '125%'
-				Dom.text tr("Payed by %1", (if +value is +curUserId then tr("you") else (participants value)))
+				Dom.text tr("Paid by %1", (if +value is +curUserId then tr("you") else (participants value)))
 				Dom.div tr("Tap to change")
 
 
@@ -325,26 +332,30 @@ renderNewTransaction = (id) !->
 
 		participantToggles = {}
 		selCount = Obs.value 0
+		allCount = Obs.value 0
 
 		Dom.div !->
 			Dom.style
-				display_: 'box'
-				_boxAlign: 'center'
+				Box: 'center'
 				padding: '12px 2px 0 6px'
 			Dom.h2 !->
 				Dom.style display: 'inline-block'
 				Dom.text tr("Participants: %1", selCount())
 			Dom.div !->
-				Dom.style _boxFlex: 1, textAlign: 'right'
-				Ui.button tr("Clear"), !->
-					participants (participantId) !->
-						participantToggles[participantId]?.value false
-				Ui.button tr("Select all"), !->
-					participants (participantId) !->
-						participantToggles[participantId]?.value true
+				Dom.style Flex: 1, textAlign: 'right'
+				Ui.button (if selCount() is allCount() then tr("Select none") else tr("Select all")), !->
+					if selCount() is allCount()
+						participants (participantId) !->
+							participantToggles[participantId]?.value false
+					else
+						participants (participantId) !->
+							participantToggles[participantId]?.value true
 
 		# input that handles selection of the participants
 		participantToggle = (opts) ->
+			content = opts.content
+			delete opts.content # don't feed this to the makeInput below
+
 			[handleChange, initValue] = Form.makeInput opts, (v) -> !!v
 
 			value = Obs.value initValue
@@ -356,7 +367,7 @@ renderNewTransaction = (id) !->
 					width: boxSize()-28 + 'px'
 					height: '42px'
 
-				opts.content? value()
+				content? value()
 
 				Dom.onTap !->
 					value !value()
@@ -379,14 +390,17 @@ renderNewTransaction = (id) !->
 						selCount selCount()+1
 						Obs.onClean !->
 							selCount selCount()-1
+					allCount allCount()+1
+					Obs.onClean !->
+						allCount allCount()-1
 
 					Dom.div !->
-						Dom.style display_: 'box', _boxAlign: 'center', height: '100%'
+						Dom.style Box: 'middle', height: '100%'
 						Ui.avatar Plugin.userAvatar(participantId) if participantId > 0
 
 						Dom.div !->
 							Dom.style
-								_boxFlex: 1
+								Flex: 1
 								fontWeight: if +participantId is curUserId then 'bold' else 'normal'
 								overflow: 'hidden'
 								textOverflow: 'ellipsis'
@@ -400,14 +414,15 @@ renderNewTransaction = (id) !->
 									Dom.text '€ ' + (Math.round(enteredAmount() / selCount() * 100) / 100).toFixed(2)
 
 						Dom.div !->
-							Dom.style textAlign: 'right', color: '#72BB53', fontWeight: 'bold'
+							Dom.style textAlign: 'right', color: Plugin.colors().highlight, fontWeight: 'bold'
 							Dom.text (if value then "✓" else "")
 
 
+		### should be taken care of by happening members now
 		Dom.section !->
 			Dom.style
 				display: 'inline-block'
-				color: '#72bb53'
+				color: Plugin.colors().highlight
 				verticalAlign: 'top'
 				margin: '6px'
 				width: boxSize()-30 + 'px'
@@ -419,6 +434,7 @@ renderNewTransaction = (id) !->
 
 			Dom.text tr("+ New participant")
 			Dom.onTap !-> Page.nav 'newParticipant'
+		###
 
 
 exports.render = !->
@@ -432,35 +448,33 @@ exports.render = !->
 		renderNewTransaction what
 	else
 		# main page with an overview of transactions concerning the current user
-		Dom.div !->
-			Dom.style display_: 'box', margin: '6px 0', _boxAlign: 'center'
-				
-			# button to trigger the balances overview page
-			Ui.bigButton !->
-				Dom.style margin: 0
-				Dom.text tr("All balances")
-			, !-> Page.nav 'balances'
-
-			# this user's total balance
-			Dom.div !->
-				Dom.style  _boxFlex: 1, textAlign: 'right', paddingRight: '14px'
-				Dom.span !->
-					Dom.style fontSize: '85%'
-					Dom.text "Your balance:"
-				Dom.br()
-				Dom.span !->
-					euros = ((balances curUserId)||0)/100
-					Dom.style
-						fontWeight: 'bold'
-						fontSize: '125%'
-						color: if euros>0 then 'inherit' else '#BB5353'
-					Dom.text "€ " + euros.toFixed(2)
+		
+		Page.setFooter
+			label: tr 'Show all balances'
+			action: !-> Page.nav 'balances'
 
 		# display an overview of transactions where the current user is involved
 		Ui.list !->
+			#Dom.style backgroundColor: '#fff', borderBottom: '2px solid #ccc'
+			# this user's total balance
+			#Dom.div !->
+			#	Dom.style Flex: 1, textAlign: 'right', padding: '12px 8px', backgroundColor: '#e9e9e9'
+			Dom.h2 !->
+				Dom.style Box: true
+				Dom.div tr("Your balance:")
+				Dom.div !->
+					euros = ((balances curUserId)||0)/100
+					Dom.style
+						Flex: 1
+						textAlign: 'right'
+						paddingRight: '6px'
+						fontWeight: 'bold'
+						color: if euros>0 then '#666' else Plugin.colors().highlight
+					Dom.text "€ " + euros.toFixed(2)
+
 			Ui.item !->
-				Dom.style color: '#72bb53'
-				Dom.text tr('+ New transaction')
+				Dom.style color: Plugin.colors().highlight
+				Dom.text tr('+ Add transaction')
 				Dom.onTap !-> Page.nav 'new'
 
 			(Db.shared 'transactions')? (id, transaction) !->
@@ -474,7 +488,7 @@ exports.render = !->
 						Obs.onClean !->
 							(borrowedCents 0)
 
-				Obs.observe !-> if lentCents() or borrowedCents() or +(transaction 'creatorId') is curUserId
+				Obs.observe !->
 					log '>> lent, borrowed', lentCents(), borrowedCents()
 					Ui.item !->
 						syncText = false
@@ -490,7 +504,7 @@ exports.render = !->
 
 						# transaction description, amount and how many people involved
 						Dom.div !->
-							Dom.style _boxFlex: 1
+							Dom.style Flex: 1
 							Dom.text "#{(transaction 'description')}"
 							Dom.br()
 							if syncText
@@ -508,11 +522,10 @@ exports.render = !->
 								Dom.style
 									textAlign: 'right'
 									fontWeight: 'bold'
-									color: if cents>0 then 'inherit' else '#BB5353'
+									color: if cents>0 then 'inherit' else (if cents<0 then Plugin.colors().highlight else '#aaa')
 
 								Dom.text "€ " + (cents/100).toFixed(2)
 
-						#Dom.onTap !-> Page.nav id
 						if !syncText
 							Dom.onTap !-> showTransactionModal(id)
 			, (id) -> -id
