@@ -1,3 +1,4 @@
-name: Example
-description: An example plugin. Use this as the base for your own glorious plugins!
+name: Money v2
+description: Money plugin version 2
 api: 2
+icon: coins
